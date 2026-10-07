@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>크롬 공룡점프</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<style>
+:root{--fg:#535353;--bg:#f7f7f7;--accent:#e8590c}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;touch-action:manipulation;overflow:hidden}
+#app{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;gap:12px}
+.screen{display:none;width:100%;max-width:520px;flex-direction:column;align-items:center;gap:12px;text-align:center}
+.screen.on{display:flex}
+h1{margin:0;font-size:30px;letter-spacing:-1px}
+input{width:100%;font-size:20px;padding:14px;border:2px solid var(--fg);border-radius:10px;text-align:center;background:#fff;color:var(--fg);user-select:text;-webkit-user-select:text}
+button{font-size:20px;font-weight:700;padding:14px 28px;border:0;border-radius:10px;background:var(--fg);color:#fff;width:100%;cursor:pointer}
+button.sub{background:#ddd;color:var(--fg);font-size:15px;padding:10px}
+button:disabled{opacity:.4}
+canvas{width:100%;max-width:520px;aspect-ratio:16/9;background:#fff;border:2px solid var(--fg);border-radius:10px;touch-action:none;display:block}
+ol{list-style:none;margin:0;padding:0;width:100%;background:#fff;border:2px solid #ddd;border-radius:10px;overflow:hidden}
+li{display:flex;gap:10px;padding:7px 14px;font-size:16px;border-bottom:1px solid #eee;text-align:left}
+li:last-child{border:0}li .r{width:28px;font-weight:700}li .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}li .t{font-variant-numeric:tabular-nums}
+li.me{background:#fff3e0;color:var(--accent);font-weight:700}
+.big{font-size:44px;font-weight:800;font-variant-numeric:tabular-nums}
+.note{font-size:13px;opacity:.7}
+.empty{padding:14px;opacity:.6}
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="s-name" class="screen on">
+    <h1>🦖 크롬 공룡점프</h1>
+    <p class="note">결승선까지 가장 빨리 도착하세요!<br>장애물에 닿으면 +2초 페널티</p>
+    <input id="name" maxlength="12" placeholder="이름 입력 (최대 12자)" autocomplete="off">
+    <button id="enter" disabled>입장</button>
+  </section>
+
+  <section id="s-lobby" class="screen">
+    <h1>🏆 TOP 10</h1>
+    <ol id="lobby-rank"></ol>
+    <button id="start">시작</button>
+    <button id="rename" class="sub">이름 변경</button>
+  </section>
+
+  <section id="s-play" class="screen">
+    <canvas id="cv" width="480" height="270"></canvas>
+    <p class="note">화면 터치 / 스페이스 / ↑ 로 점프</p>
+  </section>
+
+  <section id="s-result" class="screen">
+    <div class="note" id="res-label">완료 시간</div>
+    <div class="big" id="res-time"></div>
+    <div id="res-msg"></div>
+    <ol id="res-rank"></ol>
+    <button id="again">다시하기</button>
+    <button id="tolobby" class="sub">로비로</button>
+  </section>
+</div>
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const W=480,H=270,GROUND=220,GOAL=9000,SPEED=300,PENALTY=2000,JUMP_V=620,GRAV=1800;
+const mem={};
+const store={get:k=>{try{return localStorage.getItem(k)}catch(e){return mem[k]??null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){mem[k]=v}}};
+const sb=(window.SUPABASE_URL&&window.SUPABASE_ANON_KEY&&window.supabase)?window.supabase.createClient(window.SUPABASE_URL,window.SUPABASE_ANON_KEY):null;
+let player=store.get('dino_name')||'';
+
+/* ---------- 화면 ---------- */
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id))}
+const fmt=ms=>(ms/1000).toFixed(2)+'초';
+const esc=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- 랭킹 (Supabase / 미설정 시 로컬) ---------- */
+async function fetchRank(){
+  if(sb){
+    const {data,error}=await sb.from('rankings').select('name,time_ms').order('time_ms',{ascending:true}).order('created_at',{ascending:true}).limit(10);
+    if(!error)return data;
+  }
+  return JSON.parse(store.get('dino_local_rank')||'[]');
+}
+async function submit(name,ms){
+  if(sb){
+    const {data,error}=await sb.rpc('submit_score',{p_name:name,p_time_ms:ms});
+    if(!error)return data;
+    console.error(error);
+  }
+  const l=JSON.parse(store.get('dino_local_rank')||'[]');
+  l.push({name,time_ms:ms});l.sort((a,b)=>a.time_ms-b.time_ms);
+  const rank=l.findIndex(x=>x.name===name&&x.time_ms===ms)+1;
+  store.set('dino_local_rank',JSON.stringify(l.slice(0,10)));
+  return rank<=10?rank:null;
+}
+function renderRank(el,rows,myRank){
+  el.innerHTML=rows.length?rows.map((r,i)=>`<li class="${myRank===i+1?'me':''}"><span class="r">${i+1}</span><span class="n">${esc(r.name)}</span><span class="t">${fmt(r.time_ms)}</span></li>`).join(''):'<li class="empty">아직 기록이 없어요. 첫 기록의 주인공이 되세요!</li>';
+}
+async function lobby(){show('s-lobby');renderRank($('lobby-rank'),[],0);renderRank($('lobby-rank'),await fetchRank())}
+
+/* ---------- 입장 ---------- */
+const nameEl=$('name');nameEl.value=player;
+const chk=()=>{$('enter').disabled=!nameEl.value.trim()};
+nameEl.oninput=chk;chk();
+$('enter').onclick=()=>{player=nameEl.value.trim().slice(0,12);if(!player)return;store.set('dino_name',player);lobby()};
+nameEl.onkeydown=e=>{if(e.key==='Enter')$('enter').click()};
+$('rename').onclick=()=>show('s-name');
+$('tolobby').onclick=lobby;
+$('start').onclick=startGame;
+$('again').onclick=startGame;
+
+/* ---------- 게임 ---------- */
+const cv=$('cv'),cx=cv.getContext('2d');
+// 고정 시드 장애물 배치 (모든 플레이어 동일)
+function rng(seed){return()=>(seed=(seed*1664525+1013904223)>>>0)/4294967296}
+function makeObstacles(){
+  const r=rng(20240607),o=[];let x=900;
+  while(x<GOAL-500){
+    const t=r(),w=t<.4?22:t<.8?30:52,h=t<.4?36:t<.8?52:40;
+    o.push({x,w,h,hit:false});
+    x+=380+Math.floor(r()*260);
+  }
+  return o;
+}
+let G=null,raf=0;
+function startGame(){
+  show('s-play');
+  G={obs:makeObstacles(),dx:0,y:0,vy:0,hits:0,inv:0,state:'count',cd:3,cdT:performance.now(),t0:0,last:0,elapsed:0};
+  cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
+}
+function jump(){if(G&&G.state==='run'&&G.y===0)G.vy=JUMP_V}
+cv.addEventListener('pointerdown',e=>{e.preventDefault();jump()});
+document.addEventListener('keydown',e=>{if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();if($('s-play').classList.contains('on'))jump()}});
+
+function loop(now){
+  if(!G)return;
+  if(G.state==='count'){
+    const left=3-Math.floor((now-G.cdT)/700);
+    if(left<=0){G.state='run';G.t0=now;G.last=now}else G.cd=left;
+  }else if(G.state==='run'){
+    const dt=Math.min((now-G.last)/1000,.05);G.last=now;
+    G.dx+=SPEED*dt;
+    // y: 지면 위 높이(양수=위), vy: 위로 향하면 양수
+    G.vy-=GRAV*dt;G.y+=G.vy*dt;
+    if(G.y<=0){G.y=0;G.vy=0}
+    G.inv=Math.max(0,G.inv-dt);
+    // 공룡 히트박스 (월드좌표: 화면 x=80 기준)
+    const px=G.dx+80,pw=28,ph=36;
+    for(const o of G.obs){
+      if(o.hit)continue;
+      if(px+pw-6>o.x+4&&px+6<o.x+o.w-4&&G.y<o.h-8){
+        o.hit=true;G.hits++;G.inv=.8;
+      }
+    }
+    G.elapsed=now-G.t0;
+    if(G.dx>=GOAL){finish();return}
+  }
+  draw(now);
+  raf=requestAnimationFrame(loop);
+}
+function total(){return Math.round(G.elapsed+G.hits*PENALTY)}
+
+function draw(now){
+  cx.clearRect(0,0,W,H);
+  cx.fillStyle='#535353';
+  cx.fillRect(0,GROUND,W,2);
+  // 지면 점
+  for(let i=0;i<30;i++){const gx=((i*97-G.dx)%W+W)%W;cx.fillRect(gx,GROUND+8+(i%3)*8,6,2)}
+  // 결승선
+  const fx=GOAL+80-G.dx;
+  if(fx<W+20){
+    for(let i=0;i<8;i++){cx.fillStyle=i%2?'#000':'#fff';cx.fillRect(fx,GROUND-80+i*10,10,10);cx.fillStyle=i%2?'#fff':'#000';cx.fillRect(fx+10,GROUND-80+i*10,10,10)}
+    cx.strokeStyle='#000';cx.strokeRect(fx,GROUND-80,20,80);
+  }
+  // 장애물
+  cx.fillStyle='#535353';
+  for(const o of G.obs){
+    if(o.hit)continue;
+    const sx=o.x-G.dx;if(sx<-60||sx>W+10)continue;
+    if(o.w>40){cactus(sx,o.h);cactus(sx+28,o.h*.8)}else cactus(sx,o.h,o.w);
+  }
+  // 공룡
+  const sy=GROUND-G.y;
+  if(!(G.inv>0&&Math.floor(now/80)%2))dino(80,sy,G.y>0,now);
+  // HUD
+  cx.fillStyle='#535353';cx.font='bold 18px sans-serif';cx.textAlign='left';
+  cx.fillText((total()/1000).toFixed(2)+'초',12,26);
+  cx.textAlign='right';cx.fillText(G.hits?`페널티 ×${G.hits}`:'',W-12,26);
+  cx.fillStyle='#ddd';cx.fillRect(12,36,W-24,6);cx.fillStyle='#e8590c';cx.fillRect(12,36,(W-24)*Math.min(1,G.dx/GOAL),6);
+  if(G.state==='count'){cx.fillStyle='rgba(255,255,255,.7)';cx.fillRect(0,0,W,H);cx.fillStyle='#535353';cx.font='bold 80px sans-serif';cx.textAlign='center';cx.fillText(G.cd,W/2,GROUND-40)}
+}
+function cactus(x,h,w=22){
+  const b=GROUND;cx.fillRect(x+w/2-5,b-h,10,h);
+  cx.fillRect(x,b-h*.65,w/2,7);cx.fillRect(x,b-h*.65-14,7,14);
+  if(w>26){cx.fillRect(x+w/2,b-h*.45,w/2,7);cx.fillRect(x+w-7,b-h*.45-14,7,14)}
+}
+function dino(x,y,air,now){
+  cx.fillStyle='#535353';
+  cx.fillRect(x+8,y-40,22,16);          // 머리
+  cx.fillRect(x+24,y-34,12,8);          // 주둥이
+  cx.fillStyle='#fff';cx.fillRect(x+22,y-37,4,4);cx.fillStyle='#535353';
+  cx.fillRect(x+4,y-26,22,18);          // 몸
+  cx.fillRect(x-4,y-22,10,6);           // 꼬리
+  cx.fillRect(x+26,y-22,8,4);           // 팔
+  const f=air?0:Math.floor(now/90)%2;   // 다리 애니메이션
+  cx.fillRect(x+6,y-8,6,8+(f?0:-3));
+  cx.fillRect(x+18,y-8,6,8+(f?-3:0));
+}
+
+async function finish(){
+  const ms=total();G.state='done';cancelAnimationFrame(raf);
+  show('s-result');
+  $('res-time').textContent=fmt(ms);
+  $('res-msg').textContent=`장애물 충돌 ${G.hits}회 (+${(G.hits*PENALTY/1000).toFixed(0)}초 포함)`;
+  $('res-rank').innerHTML='<li class="empty">기록 저장 중…</li>';
+  $('again').disabled=true;
+  const rank=await submit(player,ms);
+  $('res-msg').textContent=(rank?`🎉 ${rank}위 등록!`:'아쉽게 TOP 10 진입 실패')+` · 충돌 ${G.hits}회`;
+  renderRank($('res-rank'),await fetchRank(),rank);
+  $('again').disabled=false;
+}
+if(!sb)console.warn('Supabase 미설정 — 로컬 저장 모드. config.js를 채워주세요.');
+})();
+</script>
+</body>
+</html>
