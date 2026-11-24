@@ -214,17 +214,22 @@ function loop(t){
     var left=3-Math.floor((t-G.cdT)/700);
     if(left<=0){G.state='run';G.t0=t;G.last=t}else G.cd=left;
   }else if(G.state==='run'){
-    var dt=Math.min((t-G.last)/1000,.05);G.last=t;
-    G.dx+=G.speed*dt;
-    G.vy-=GRAV*dt;G.y+=G.vy*dt;
-    if(G.y<=0){G.y=0;G.vy=0}
-    G.inv=Math.max(0,G.inv-dt);
-    var px=G.dx+80,pw=28;
-    for(var i=0;i<G.obs.length;i++){
-      var o=G.obs[i];if(o.hit)continue;
-      if(px+pw-6>o.x+4&&px+6<o.x+o.w-4&&G.y<o.h-8){o.hit=true;G.hits++;G.inv=.8}
+    // 프레임이 느려도 결과가 같도록 1/60초 이하의 고정 간격으로 나눠서 계산.
+    // 기록 시간도 '게임 진행 시간'(계산한 간격의 합)이라 렉이 있어도 불리하지 않음.
+    var real=Math.min((t-G.last)/1000,.2);G.last=t;
+    var steps=Math.max(1,Math.ceil(real*60)),dt=real/steps;
+    for(var k=0;k<steps&&G.dx<GOAL;k++){
+      G.dx+=G.speed*dt;
+      G.vy-=GRAV*dt;G.y+=G.vy*dt;
+      if(G.y<=0){G.y=0;G.vy=0}
+      G.inv=Math.max(0,G.inv-dt);
+      G.elapsed+=dt*1000;
+      var px=G.dx+80,pw=28;
+      for(var i=0;i<G.obs.length;i++){
+        var o=G.obs[i];if(o.hit)continue;
+        if(px+pw-6>o.x+4&&px+6<o.x+o.w-4&&G.y<o.h-8){o.hit=true;G.hits++;G.inv=.8}
+      }
     }
-    G.elapsed=t-G.t0;
     if(G.dx>=GOAL){draw(t);finish();return}
   }
   draw(t);
