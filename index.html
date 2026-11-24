@@ -16,6 +16,11 @@ p{margin:6px 0 14px;font-size:14px;opacity:.75;line-height:1.5}
 input{display:block;width:100%;font-size:18px;padding:14px;border:2px solid #535353;border-radius:10px;text-align:center;background:#fff;color:#535353;margin-bottom:12px;-webkit-user-select:text;user-select:text;-webkit-appearance:none}
 button{display:block;width:100%;font-size:20px;font-weight:700;padding:15px;border:0;border-radius:10px;background:#535353;color:#fff;margin-bottom:10px;-webkit-appearance:none}
 button.sub{background:#ddd;color:#535353;font-size:15px;padding:11px}
+.seg{display:-webkit-flex;display:flex;margin:0 0 12px}
+.seg button{-webkit-flex:1;flex:1;margin:0 4px 0 0;font-size:16px;padding:12px 4px;background:#ddd;color:#535353}
+.seg button:last-child{margin-right:0}
+.seg button.sel{background:#535353;color:#fff}
+.dnote{font-size:13px;opacity:.7;margin:0 0 10px}
 button:disabled{opacity:.4}
 ol{list-style:none;margin:0 0 14px;padding:0;background:#fff;border:2px solid #ddd;border-radius:10px;overflow:hidden;text-align:left}
 li{display:-webkit-flex;display:flex;padding:8px 14px;font-size:16px;border-bottom:1px solid #eee}
@@ -42,6 +47,10 @@ li.empty{display:block;text-align:center;opacity:.6}
 
 <div id="s-lobby" class="screen"><div class="wrap">
   <h1>🏆 TOP 10</h1>
+  <div class="seg" id="diff-seg">
+    <button data-d="easy">쉬움</button><button data-d="normal">보통</button><button data-d="hard">어려움</button>
+  </div>
+  <div class="dnote" id="diff-note"></div>
   <ol id="lobby-rank"></ol>
   <button id="start">시작</button>
   <button id="rename" class="sub">이름 변경</button>
@@ -50,7 +59,7 @@ li.empty{display:block;text-align:center;opacity:.6}
 <div id="s-play" class="screen"><canvas id="cv" width="480" height="270"></canvas></div>
 
 <div id="s-result" class="screen"><div class="wrap">
-  <p>완료 시간</p>
+  <p id="res-diff">완료 시간</p>
   <div class="big" id="res-time"></div>
   <p id="res-msg"></p>
   <ol id="res-rank"></ol>
@@ -66,7 +75,22 @@ var $=function(id){return document.getElementById(id)};
 function showErr(m){var e=$('err');e.style.display='block';e.textContent='오류: '+m}
 window.onerror=function(m){showErr(m)};
 
-var W=480,H=270,GROUND=220,GOAL=9000,SPEED=300,PENALTY=2000,JUMP_V=620,GRAV=1800;
+var W=480,H=270,GROUND=220,GOAL=9000,PENALTY=2000,JUMP_V=620,GRAV=1800;
+/* 난이도: 속도·장애물 간격·연속(2개 붙은) 장애물 확률 */
+var DIFFS={
+  easy:{label:'쉬움',speed:250,gapMin:480,gapRand:300,pair:0,seed:11,note:'느린 속도 · 넉넉한 간격'},
+  normal:{label:'보통',speed:300,gapMin:380,gapRand:260,pair:0,seed:20240607,note:'기본 속도'},
+  hard:{label:'어려움',speed:380,gapMin:330,gapRand:200,pair:.3,seed:77,note:'빠른 속도 · 연속 장애물'}
+};
+/* 장애물: 보험사 (DB, KB, 삼성, 현대) */
+var BRANDS=[
+  {name:'DB',bg:'#009a44',fg:'#fff',w:40,h:40},
+  {name:'KB',bg:'#ffb800',fg:'#3a3a3a',w:40,h:44},
+  {name:'삼성',bg:'#1428a0',fg:'#fff',w:56,h:36},
+  {name:'현대',bg:'#002c5f',fg:'#fff',w:56,h:44}
+];
+var diff=sget0('dino_diff');
+function sget0(k){try{var v=localStorage.getItem(k);return DIFFS[v]?v:'normal'}catch(e){return 'normal'}}
 var URL_=(window.SUPABASE_URL||'').replace(/\/$/,''),KEY=window.SUPABASE_ANON_KEY||'';
 var mem={};
 function sget(k){try{var v=localStorage.getItem(k);return v===null?(mem[k]||null):v}catch(e){return mem[k]||null}}
@@ -90,26 +114,26 @@ function req(method,path,body,cb){
   x.onerror=x.ontimeout=function(){cb('network',null)};
   x.send(body?JSON.stringify(body):null);
 }
-function localRank(){try{return JSON.parse(sget('dino_local_rank')||'[]')}catch(e){return []}}
-function fetchRank(cb){
-  if(!URL_||!KEY)return cb(localRank());
-  req('GET','/rest/v1/rankings?select=name,time_ms&order=time_ms.asc,created_at.asc&limit=10',null,function(err,d){
-    cb(err||!d?localRank():d);
+function localRank(d){try{return JSON.parse(sget('dino_local_rank_'+d)||'[]')}catch(e){return []}}
+function fetchRank(d,cb){
+  if(!URL_||!KEY)return cb(localRank(d));
+  req('GET','/rest/v1/rankings?select=name,time_ms&difficulty=eq.'+d+'&order=time_ms.asc,created_at.asc&limit=10',null,function(err,data){
+    cb(err||!data?localRank(d):data);
   });
 }
-function submit(name,ms,cb){
+function submit(name,ms,d,cb){
   if(URL_&&KEY){
-    req('POST','/rest/v1/rpc/submit_score',{p_name:name,p_time_ms:ms},function(err,d){
-      if(!err)return cb(typeof d==='number'?d:null,true);
-      saveLocal(name,ms,cb);
+    req('POST','/rest/v1/rpc/submit_score',{p_name:name,p_time_ms:ms,p_difficulty:d},function(err,data){
+      if(!err)return cb(typeof data==='number'?data:null,true);
+      saveLocal(name,ms,d,cb);
     });
-  }else saveLocal(name,ms,cb);
+  }else saveLocal(name,ms,d,cb);
 }
-function saveLocal(name,ms,cb){
-  var l=localRank();l.push({name:name,time_ms:ms});
+function saveLocal(name,ms,d,cb){
+  var l=localRank(d);l.push({name:name,time_ms:ms});
   l.sort(function(a,b){return a.time_ms-b.time_ms});
   var r=0;for(var i=0;i<l.length;i++)if(l[i].name===name&&l[i].time_ms===ms){r=i+1;break}
-  sset('dino_local_rank',JSON.stringify(l.slice(0,10)));
+  sset('dino_local_rank_'+d,JSON.stringify(l.slice(0,10)));
   cb(r<=10?r:null,false);
 }
 function renderRank(el,rows,my){
@@ -117,7 +141,19 @@ function renderRank(el,rows,my){
   var h='';for(var i=0;i<rows.length;i++)h+='<li'+(my===i+1?' class="me"':'')+'><span class="r">'+(i+1)+'</span><span class="n">'+esc(rows[i].name)+'</span><span>'+fmt(rows[i].time_ms)+'</span></li>';
   el.innerHTML=h;
 }
-function lobby(){show('s-lobby');$('lobby-rank').innerHTML='<li class="empty">불러오는 중…</li>';fetchRank(function(r){renderRank($('lobby-rank'),r,0)})}
+function paintSeg(){
+  var b=$('diff-seg').getElementsByTagName('button');
+  for(var i=0;i<b.length;i++)b[i].className=b[i].getAttribute('data-d')===diff?'sel':'';
+  $('diff-note').textContent=DIFFS[diff].note;
+}
+function lobby(){
+  show('s-lobby');paintSeg();$('lobby-rank').innerHTML='<li class="empty">불러오는 중…</li>';
+  var d=diff;fetchRank(d,function(r){if(d===diff)renderRank($('lobby-rank'),r,0)});
+}
+(function(){
+  var b=$('diff-seg').getElementsByTagName('button');
+  for(var i=0;i<b.length;i++)(function(btn){on(btn,'click',function(){diff=btn.getAttribute('data-d');sset('dino_diff',diff);lobby()})})(b[i]);
+})();
 
 /* ---------- 입장 ---------- */
 var nameEl=$('name');nameEl.value=player;
@@ -142,12 +178,20 @@ var view={s:1,ox:0,oy:0};
 window.addEventListener('resize',resize,false);
 
 function rng(seed){return function(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}}
-function makeObstacles(){
-  var r=rng(20240607),o=[],x=900;
+function makeObstacles(D){
+  var r=rng(D.seed),o=[],x=900;
   while(x<GOAL-500){
-    var t=r(),w=t<.4?22:t<.8?30:52,h=t<.4?36:t<.8?52:40;
-    o.push({x:x,w:w,h:h,hit:false});
-    x+=380+Math.floor(r()*260);
+    var b=BRANDS[Math.floor(r()*BRANDS.length)];
+    if(D.pair&&r()<D.pair){
+      var s=BRANDS[Math.floor(r()*2)],s2=BRANDS[Math.floor(r()*2)];  // 붙어 있는 작은 장애물 2개
+      o.push({x:x,w:s.w,h:s.h,b:s,hit:false});
+      o.push({x:x+s.w+8,w:s2.w,h:s2.h,b:s2,hit:false});
+      x+=s.w+8+s2.w;
+    }else{
+      o.push({x:x,w:b.w,h:b.h,b:b,hit:false});
+      x+=b.w;
+    }
+    x+=D.gapMin+Math.floor(r()*D.gapRand);
   }
   return o;
 }
@@ -155,7 +199,7 @@ var G=null,raf=0;
 function now(){return window.performance&&performance.now?performance.now():+new Date()}
 function startGame(){
   show('s-play');resize();
-  G={obs:makeObstacles(),dx:0,y:0,vy:0,hits:0,inv:0,state:'count',cd:3,cdT:now(),t0:0,last:0,elapsed:0};
+  G={d:diff,speed:DIFFS[diff].speed,obs:makeObstacles(DIFFS[diff]),dx:0,y:0,vy:0,hits:0,inv:0,state:'count',cd:3,cdT:now(),t0:0,last:0,elapsed:0};
   cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
 }
 function jump(){if(G&&G.state==='run'&&G.y===0)G.vy=JUMP_V}
@@ -171,7 +215,7 @@ function loop(t){
     if(left<=0){G.state='run';G.t0=t;G.last=t}else G.cd=left;
   }else if(G.state==='run'){
     var dt=Math.min((t-G.last)/1000,.05);G.last=t;
-    G.dx+=SPEED*dt;
+    G.dx+=G.speed*dt;
     G.vy-=GRAV*dt;G.y+=G.vy*dt;
     if(G.y<=0){G.y=0;G.vy=0}
     G.inv=Math.max(0,G.inv-dt);
@@ -189,10 +233,12 @@ function loop(t){
 function total(){return Math.round(G.elapsed+G.hits*PENALTY)}
 
 function rect(x,y,w,h){cx.fillRect(x,y,w,h)}
-function cactus(x,h,w){
-  var b=GROUND;rect(x+w/2-5,b-h,10,h);
-  rect(x,b-h*.65,w/2,7);rect(x,b-h*.65-14,7,14);
-  if(w>26){rect(x+w/2,b-h*.45,w/2,7);rect(x+w-7,b-h*.45-14,7,14)}
+function block(x,o){
+  var b=o.b;
+  cx.fillStyle=b.bg;rect(x,GROUND-o.h,o.w,o.h);
+  cx.fillStyle='rgba(0,0,0,.25)';rect(x,GROUND-3,o.w,3);
+  cx.fillStyle=b.fg;cx.font='bold '+(b.name.length>2?'14':'17')+'px sans-serif';cx.textAlign='center';
+  cx.fillText(b.name,x+o.w/2,GROUND-o.h/2+6);
 }
 function dino(x,y,air,t){
   cx.fillStyle='#535353';
@@ -214,11 +260,10 @@ function draw(t){
     for(i=0;i<8;i++){cx.fillStyle=i%2?'#000':'#fff';rect(fx,GROUND-80+i*10,10,10);cx.fillStyle=i%2?'#fff':'#000';rect(fx+10,GROUND-80+i*10,10,10)}
     cx.strokeStyle='#000';cx.strokeRect(fx,GROUND-80,20,80);
   }
-  cx.fillStyle='#535353';
   for(i=0;i<G.obs.length;i++){
     var o=G.obs[i];if(o.hit)continue;
     var sx=o.x-G.dx;if(sx<-60||sx>W+10)continue;
-    if(o.w>40){cactus(sx,o.h,22);cactus(sx+28,o.h*.8,22)}else cactus(sx,o.h,o.w);
+    block(sx,o);
   }
   if(!(G.inv>0&&Math.floor(t/80)%2))dino(80,GROUND-G.y,G.y>0,t);
   cx.fillStyle='#535353';cx.font='bold 18px sans-serif';cx.textAlign='left';
@@ -235,14 +280,16 @@ function draw(t){
 
 function finish(){
   var ms=total(),hits=G.hits;G.state='done';cancelAnimationFrame(raf);
+  var d=G.d;
   show('s-result');
+  $('res-diff').textContent='['+DIFFS[d].label+'] 완료 시간';
   $('res-time').textContent=fmt(ms);
   $('res-msg').textContent='기록 저장 중…';
   $('res-rank').innerHTML='';
   $('again').disabled=true;
-  submit(player,ms,function(rank,online){
+  submit(player,ms,d,function(rank,online){
     $('res-msg').textContent=(rank?'🎉 '+rank+'위 등록!':'아쉽게 TOP 10 진입 실패')+' · 충돌 '+hits+'회'+(online?'':' (오프라인 저장)');
-    fetchRank(function(r){renderRank($('res-rank'),r,rank);$('again').disabled=false});
+    fetchRank(d,function(r){renderRank($('res-rank'),r,rank);$('again').disabled=false});
   });
 }
 })();
