@@ -32,6 +32,12 @@ li.empty{display:block;text-align:center;opacity:.6}
 .big{font-size:46px;font-weight:800;margin:6px 0}
 #s-play{padding:0;background:#fff}
 #cv{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+#toast{display:none;position:absolute;left:12px;right:12px;top:19%;max-width:440px;margin:0 auto;padding:10px 14px 12px;border-radius:14px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.2);pointer-events:none;z-index:2;word-break:keep-all}
+#toast.on{display:block;-webkit-animation:pop .25s ease-out;animation:pop .25s ease-out}
+#toast .tag{font-size:12px;font-weight:700;opacity:.85;margin-bottom:4px}
+#toast .msg{font-size:17px;font-weight:800;line-height:1.4}
+@-webkit-keyframes pop{0%{-webkit-transform:scale(.8);opacity:0}70%{-webkit-transform:scale(1.04);opacity:1}100%{-webkit-transform:scale(1)}}
+@keyframes pop{0%{transform:scale(.8);opacity:0}70%{transform:scale(1.04);opacity:1}100%{transform:scale(1)}}
 #err{display:none;position:fixed;left:0;right:0;top:0;background:#c92a2a;color:#fff;font-size:12px;padding:6px 10px;z-index:9;word-break:break-all}
 </style>
 </head>
@@ -56,7 +62,9 @@ li.empty{display:block;text-align:center;opacity:.6}
   <button id="rename" class="sub">이름 변경</button>
 </div></div>
 
-<div id="s-play" class="screen"><canvas id="cv" width="480" height="270"></canvas></div>
+<div id="s-play" class="screen"><canvas id="cv" width="480" height="270"></canvas>
+  <div id="toast" aria-live="polite"><div class="tag"></div><div class="msg"></div></div>
+</div>
 
 <div id="s-result" class="screen"><div class="wrap">
   <p id="res-diff">완료 시간</p>
@@ -89,6 +97,23 @@ var BRANDS=[
   {name:'삼성',bg:'#1428a0',fg:'#fff',w:56,h:36},
   {name:'현대',bg:'#002c5f',fg:'#fff',w:56,h:44}
 ];
+/* 부딪혔을 때 문구: "걸림돌 말고 디딤돌". 회사별로 순서대로 돌아가며 표시 */
+var QUIPS={
+  'DB':['DB가 걸림돌이라니요!\nDB는 디딤돌의 D여야죠 😎','DB야, 길을 막지 말고\n길을 열어 줘야지!','든든한 백이 되어야 할 DB가\n앞을 막으면 곤란해요 🙅'],
+  'KB':['KB, 걸림돌은 안 돼요!\n열쇠(Key)가 되어야지 자물쇠라니 🔑','KB야, 넘어야 할 산 말고\n기댈 언덕이 되어 줘!','KB가 발목을 잡다니요!\n손을 잡아 줘야죠 🤝'],
+  '삼성':['삼성의 별은 길을 비춰야지\n길을 막으면 안 되죠 ⭐','별이 세 개(三星)인데\n걸림돌까지 하면 반칙! 🚫','삼성은 1등 디딤돌만 해 주세요.\n1등 걸림돌은 사양합니다 🙏'],
+  '현대':['현대가 걸림돌이라니,\n그건 현대적이지 않아요! 😅','현대야, 앞길을 막지 말고\n앞에서 끌어 줘야지! 🚀','막아서는 건 옛날 방식!\n현대답게 응원해 주세요 📣']
+};
+var quipNo={},TOAST_SEC=2;
+function showToast(b){
+  var n=quipNo[b.name]||0;quipNo[b.name]=n+1;
+  var el=$('toast');el.className='';el.style.background=b.bg;el.style.color=b.fg;
+  el.children[0].textContent='🚧 '+b.name+', 걸림돌 NO! 디딤돌 YES! (+'+(PENALTY/1000)+'초)';
+  var m=el.children[1],lines=QUIPS[b.name][n%QUIPS[b.name].length].split('\n');
+  m.textContent='';m.appendChild(document.createTextNode(lines[0]));m.appendChild(document.createElement('br'));m.appendChild(document.createTextNode(lines[1]));
+  void el.offsetWidth;el.className='on';   // 연속 충돌에도 등장 효과가 다시 재생되도록
+}
+function hideToast(){$('toast').className=''}
 var diff=sget0('dino_diff');
 function sget0(k){try{var v=localStorage.getItem(k);return DIFFS[v]?v:'normal'}catch(e){return 'normal'}}
 var URL_=(window.SUPABASE_URL||'').replace(/\/$/,''),KEY=window.SUPABASE_ANON_KEY||'';
@@ -198,8 +223,8 @@ function makeObstacles(D){
 var G=null,raf=0;
 function now(){return window.performance&&performance.now?performance.now():+new Date()}
 function startGame(){
-  show('s-play');resize();
-  G={d:diff,speed:DIFFS[diff].speed,obs:makeObstacles(DIFFS[diff]),dx:0,y:0,vy:0,hits:0,inv:0,state:'count',cd:3,cdT:now(),t0:0,last:0,elapsed:0};
+  show('s-play');resize();hideToast();
+  G={d:diff,speed:DIFFS[diff].speed,obs:makeObstacles(DIFFS[diff]),dx:0,y:0,vy:0,hits:0,inv:0,toast:0,state:'count',cd:3,cdT:now(),t0:0,last:0,elapsed:0};
   cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
 }
 function jump(){if(G&&G.state==='run'&&G.y===0)G.vy=JUMP_V}
@@ -224,10 +249,11 @@ function loop(t){
       if(G.y<=0){G.y=0;G.vy=0}
       G.inv=Math.max(0,G.inv-dt);
       G.elapsed+=dt*1000;
+      if(G.toast>0){G.toast-=dt;if(G.toast<=0)hideToast()}
       var px=G.dx+80,pw=28;
       for(var i=0;i<G.obs.length;i++){
         var o=G.obs[i];if(o.hit)continue;
-        if(px+pw-6>o.x+4&&px+6<o.x+o.w-4&&G.y<o.h-8){o.hit=true;G.hits++;G.inv=.8}
+        if(px+pw-6>o.x+4&&px+6<o.x+o.w-4&&G.y<o.h-8){o.hit=true;G.hits++;G.inv=.8;G.toast=TOAST_SEC;showToast(o.b)}
       }
     }
     if(G.dx>=GOAL){draw(t);finish();return}
