@@ -35,7 +35,7 @@ li.empty{display:block;text-align:center;opacity:.6}
 #toast{display:none;position:absolute;left:12px;right:12px;top:19%;max-width:440px;margin:0 auto;padding:10px 14px 12px;border-radius:14px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.2);pointer-events:none;z-index:2;word-break:keep-all}
 #toast.on{display:block;-webkit-animation:pop .25s ease-out;animation:pop .25s ease-out}
 #toast .tag{font-size:12px;font-weight:700;opacity:.85;margin-bottom:4px}
-#toast .msg{font-size:17px;font-weight:800;line-height:1.4}
+#toast .msg{font-size:20px;font-weight:800;line-height:1.4}
 @-webkit-keyframes pop{0%{-webkit-transform:scale(.8);opacity:0}70%{-webkit-transform:scale(1.04);opacity:1}100%{-webkit-transform:scale(1)}}
 @keyframes pop{0%{transform:scale(.8);opacity:0}70%{transform:scale(1.04);opacity:1}100%{transform:scale(1)}}
 #err{display:none;position:fixed;left:0;right:0;top:0;background:#c92a2a;color:#fff;font-size:12px;padding:6px 10px;z-index:9;word-break:break-all}
@@ -97,20 +97,47 @@ var BRANDS=[
   {name:'삼성',bg:'#1428a0',fg:'#fff',w:56,h:36},
   {name:'현대',bg:'#002c5f',fg:'#fff',w:56,h:44}
 ];
-/* 부딪혔을 때 문구: "걸림돌 말고 디딤돌". 회사별로 순서대로 돌아가며 표시 */
+/* 부딪혔을 때 문구: "걸림돌 말고 디딤돌". 짧게 쓸 것(2초 안에 읽혀야 함). \n 은 줄바꿈.
+   회사별로 무작위 순서, 한 바퀴를 다 돌기 전에는 같은 문구가 다시 나오지 않음 */
 var QUIPS={
-  'DB':['DB가 걸림돌이라니요!\nDB는 디딤돌의 D여야죠 😎','DB야, 길을 막지 말고\n길을 열어 줘야지!','든든한 백이 되어야 할 DB가\n앞을 막으면 곤란해요 🙅'],
-  'KB':['KB, 걸림돌은 안 돼요!\n열쇠(Key)가 되어야지 자물쇠라니 🔑','KB야, 넘어야 할 산 말고\n기댈 언덕이 되어 줘!','KB가 발목을 잡다니요!\n손을 잡아 줘야죠 🤝'],
-  '삼성':['삼성의 별은 길을 비춰야지\n길을 막으면 안 되죠 ⭐','별이 세 개(三星)인데\n걸림돌까지 하면 반칙! 🚫','삼성은 1등 디딤돌만 해 주세요.\n1등 걸림돌은 사양합니다 🙏'],
-  '현대':['현대가 걸림돌이라니,\n그건 현대적이지 않아요! 😅','현대야, 앞길을 막지 말고\n앞에서 끌어 줘야지! 🚀','막아서는 건 옛날 방식!\n현대답게 응원해 주세요 📣']
+  'DB':[
+    'D는 디딤돌의 D! 😎','DB야, 비켜 말고 밀어줘! 💪','든든한 백이랬잖아~ 🥲','길막은 약관에 없어요 📄',
+    'DB, 벽 말고 다리! 🌉','내 편인 줄 알았는데! 😭','태클 사절, 응원 환영 📣','DB = 도와줘 Baby 🙏',
+    '거기 서 있으면 반칙! 🟨','막지 말고 맡겨줘! 🤝','Don\'t Block! 🚫','DB야, 오늘만 길 좀… 🥺',
+    '디딤돌 모드 ON 부탁! 🔛','발 걸기 말고 손잡기! ✋','DB, 꽃길로 바꿔줘 🌸'],
+  'KB':[
+    'Key가 돼야지, 자물쇠? 🔑','KB = 길 비켜! 🏃','산 말고 언덕이 돼줘 ⛰️','발목 말고 손목 잡아줘 🤝',
+    '노란불 말고 초록불! 🚦','KB, 킥 말고 백업! 🦵','Keep 말고 Go! 🟢','별들아, 길 좀 비춰줘 🌟',
+    '여기서 이러시면 안 돼요 🙅','KB야, 꽃길만 깔자 🌼','방지턱은 도로에만! 🚗','언덕은 좋아도 벽은 싫어 😅',
+    'KB, 브레이크 말고 액셀! 🏎️','우리 사이에 이러기야? 🥲','든든함은 뒤에서! 🛡️'],
+  '삼성':[
+    '별은 하늘에! 길 말고 ⭐','세 별이 길막이라니 ✨','1등 디딤돌만 부탁해요 🥇','반짝여야지, 막으면 쓰나! 💫',
+    '삼성아, 살짝만 비켜줘 🚪','초일류 길 비키기 기대! 🏆','별점 깎입니다 ⭐→☆','걸림돌은 신제품 아니죠? 📱',
+    '삼세번은 안 참아요 ☝️','북극성처럼 안내해줘 🧭','빛나는 건 좋은데 비켜줘 😎','삼성, 성벽 말고 성원! 📣',
+    '길막 업데이트 삭제 요망 🗑️','믿었는데 정면충돌? 💥','스타답게 길을 열어줘 🌠'],
+  '현대':[
+    '길막은 구시대! 현대답게~ 🕶️','현대야, 앞에서 끌어줘! 🚀','마음의 에어백 어디 갔어? 🎈','깜빡이도 없이 막기? 🚨',
+    '정차 금지 구역입니다 🅿️','Hi 말고 Bye, 걸림돌! 👋','현재를 막지 말아줘 ⏰','후진 말고 전진 응원! ⏩',
+    '내비에 없던 장애물! 🗺️','현대, 현 위치에서 비켜요 📍','안전거리 좀 지켜줘 📏','급정거 유발 금지! 🛑',
+    '든든한 동승석이 돼줘 🚙','요즘 누가 길을 막아요? 🤳','오늘부터 디딤돌 1일 💛']
 };
-var quipNo={},TOAST_SEC=2;
+var quipBag={},quipLast={},TOAST_SEC=2;
+function nextQuip(name){
+  var bag=quipBag[name];
+  if(!bag||!bag.length){
+    bag=QUIPS[name].slice();
+    for(var i=bag.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),tmp=bag[i];bag[i]=bag[j];bag[j]=tmp}
+    if(bag[bag.length-1]===quipLast[name])bag.unshift(bag.pop());   // 새 바퀴 첫 문구가 직전과 같지 않게
+    quipBag[name]=bag;
+  }
+  return quipLast[name]=bag.pop();
+}
 function showToast(b){
-  var n=quipNo[b.name]||0;quipNo[b.name]=n+1;
   var el=$('toast');el.className='';el.style.background=b.bg;el.style.color=b.fg;
   el.children[0].textContent='🚧 '+b.name+', 걸림돌 NO! 디딤돌 YES! (+'+(PENALTY/1000)+'초)';
-  var m=el.children[1],lines=QUIPS[b.name][n%QUIPS[b.name].length].split('\n');
-  m.textContent='';m.appendChild(document.createTextNode(lines[0]));m.appendChild(document.createElement('br'));m.appendChild(document.createTextNode(lines[1]));
+  var m=el.children[1],lines=nextQuip(b.name).split('\n');
+  m.textContent='';
+  for(var i=0;i<lines.length;i++){if(i)m.appendChild(document.createElement('br'));m.appendChild(document.createTextNode(lines[i]))}
   void el.offsetWidth;el.className='on';   // 연속 충돌에도 등장 효과가 다시 재생되도록
 }
 function hideToast(){$('toast').className=''}
