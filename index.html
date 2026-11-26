@@ -20,7 +20,9 @@ button.sub{background:#ddd;color:#535353;font-size:15px;padding:11px}
 .seg button{-webkit-flex:1;flex:1;margin:0 4px 0 0;font-size:16px;padding:12px 4px;background:#ddd;color:#535353}
 .seg button:last-child{margin-right:0}
 .seg button.sel{background:#535353;color:#fff}
-.dnote{font-size:13px;opacity:.7;margin:0 0 10px}
+.seg button[data-d=extreme]{-webkit-flex:1.7;flex:1.7;color:#c92a2a;white-space:nowrap}
+.seg button[data-d=extreme].sel{background:#c92a2a;color:#fff}
+.dnote{font-size:13px;opacity:.7;margin:0 0 10px;word-break:keep-all}
 button:disabled{opacity:.4}
 ol{list-style:none;margin:0 0 14px;padding:0;background:#fff;border:2px solid #ddd;border-radius:10px;overflow:hidden;text-align:left}
 li{display:-webkit-flex;display:flex;padding:8px 14px;font-size:16px;border-bottom:1px solid #eee}
@@ -54,7 +56,7 @@ li.empty{display:block;text-align:center;opacity:.6}
 <div id="s-lobby" class="screen"><div class="wrap">
   <h1>🏆 TOP 10</h1>
   <div class="seg" id="diff-seg">
-    <button data-d="easy">쉬움</button><button data-d="normal">보통</button><button data-d="hard">어려움</button>
+    <button data-d="easy">쉬움</button><button data-d="normal">보통</button><button data-d="hard">어려움</button><button data-d="extreme">🔥완죤어려움</button>
   </div>
   <div class="dnote" id="diff-note"></div>
   <ol id="lobby-rank"></ol>
@@ -88,7 +90,9 @@ var W=480,H=270,GROUND=220,GOAL=9000,PENALTY=2000,JUMP_V=620,GRAV=1800;
 var DIFFS={
   easy:{label:'쉬움',speed:250,gapMin:480,gapRand:300,pair:0,seed:11,note:'느린 속도 · 넉넉한 간격'},
   normal:{label:'보통',speed:300,gapMin:380,gapRand:260,pair:0,seed:20240607,note:'기본 속도'},
-  hard:{label:'어려움',speed:380,gapMin:330,gapRand:200,pair:.3,seed:77,note:'빠른 속도 · 연속 장애물'}
+  hard:{label:'어려움',speed:380,gapMin:330,gapRand:200,pair:.3,seed:77,note:'빠른 속도 · 연속 장애물'},
+  /* move: 장애물이 좌우·위아래로 움직임, grow: 충돌 1회마다 공룡이 커지는 비율(maxSize까지) */
+  extreme:{label:'완죤어려움',speed:400,gapMin:390,gapRand:220,pair:0,seed:4444,move:true,grow:.12,maxSize:2,note:'장애물이 좌우·위아래로 움직여요! 부딪힐수록 공룡이 커집니다 🦖'}
 };
 /* 장애물: 보험사 (DB, KB, 삼성, 현대) */
 var BRANDS=[
@@ -245,13 +249,21 @@ function makeObstacles(D){
     }
     x+=D.gapMin+Math.floor(r()*D.gapRand);
   }
+  if(D.move)for(var i=0;i<o.length;i++){   // 고정 시드라 모든 사람에게 같은 움직임
+    var q=o[i];
+    q.ax=25+r()*20;q.fx=2+r()*1.5;q.px=r()*6.283;     // 좌우: 폭, 빠르기, 시작 위치
+    q.ay=20+r()*30;q.fy=2.2+r()*1.8;q.py=r()*6.283;   // 위아래: 높이, 빠르기, 시작 위치
+  }
   return o;
 }
+/* 게임 진행 시간 sec 에서의 장애물 위치 (x: 좌우, lift: 바닥에서 뜬 높이) */
+function obX(o,sec){return o.ax?o.x+o.ax*Math.sin(o.px+o.fx*sec):o.x}
+function obLift(o,sec){return o.ay?o.ay*(.5-.5*Math.cos(o.py+o.fy*sec)):0}
 var G=null,raf=0;
 function now(){return window.performance&&performance.now?performance.now():+new Date()}
 function startGame(){
   show('s-play');resize();hideToast();
-  G={d:diff,speed:DIFFS[diff].speed,obs:makeObstacles(DIFFS[diff]),dx:0,y:0,vy:0,hits:0,inv:0,toast:0,state:'count',cd:3,cdT:now(),t0:0,last:0,elapsed:0};
+  G={d:diff,speed:DIFFS[diff].speed,obs:makeObstacles(DIFFS[diff]),dx:0,y:0,vy:0,hits:0,inv:0,toast:0,size:1,state:'count',cd:3,cdT:now(),t0:0,last:0,elapsed:0};
   cancelAnimationFrame(raf);raf=requestAnimationFrame(loop);
 }
 function jump(){if(G&&G.state==='run'&&G.y===0)G.vy=JUMP_V}
@@ -277,10 +289,15 @@ function loop(t){
       G.inv=Math.max(0,G.inv-dt);
       G.elapsed+=dt*1000;
       if(G.toast>0){G.toast-=dt;if(G.toast<=0)hideToast()}
-      var px=G.dx+80,pw=28;
+      var D=DIFFS[G.d],sec=G.elapsed/1000;
+      var goal=D.grow?Math.min(D.maxSize,1+D.grow*G.hits):1;
+      G.size+=(goal-G.size)*Math.min(1,dt*8);   // 부드럽게 커짐
+      var px=G.dx+80,z=G.size;
       for(var i=0;i<G.obs.length;i++){
         var o=G.obs[i];if(o.hit)continue;
-        if(px+pw-6>o.x+4&&px+6<o.x+o.w-4&&G.y<o.h-8){o.hit=true;G.hits++;G.inv=.8;G.toast=TOAST_SEC;showToast(o.b)}
+        var ox=obX(o,sec),lift=obLift(o,sec);
+        // 커진 만큼 충돌 범위도 커짐. 장애물이 높이 떠 있으면 밑으로 지나갈 수 있음
+        if(px+22*z>ox+4&&px+6*z<ox+o.w-4&&G.y<lift+o.h-8&&G.y+36*z-8>lift){o.hit=true;G.hits++;G.inv=.8;G.toast=TOAST_SEC;showToast(o.b)}
       }
     }
     if(G.dx>=GOAL){draw(t);finish();return}
@@ -288,15 +305,17 @@ function loop(t){
   draw(t);
   raf=requestAnimationFrame(loop);
 }
+function sizeOf(g){var D=DIFFS[g.d];return D.grow?Math.min(D.maxSize,1+D.grow*g.hits):1}
 function total(){return Math.round(G.elapsed+G.hits*PENALTY)}
 
 function rect(x,y,w,h){cx.fillRect(x,y,w,h)}
-function block(x,o){
-  var b=o.b;
-  cx.fillStyle=b.bg;rect(x,GROUND-o.h,o.w,o.h);
-  cx.fillStyle='rgba(0,0,0,.25)';rect(x,GROUND-3,o.w,3);
+function block(x,o,lift){
+  var b=o.b,base=GROUND-lift;
+  if(lift>3){cx.fillStyle='rgba(0,0,0,.15)';rect(x+6,GROUND-3,o.w-12,3)}   // 떠 있을 때 바닥 그림자
+  cx.fillStyle=b.bg;rect(x,base-o.h,o.w,o.h);
+  cx.fillStyle='rgba(0,0,0,.25)';rect(x,base-3,o.w,3);
   cx.fillStyle=b.fg;cx.font='bold '+(b.name.length>2?'14':'17')+'px sans-serif';cx.textAlign='center';
-  cx.fillText(b.name,x+o.w/2,GROUND-o.h/2+6);
+  cx.fillText(b.name,x+o.w/2,base-o.h/2+6);
 }
 function dino(x,y,air,t){
   cx.fillStyle='#535353';
@@ -320,13 +339,15 @@ function draw(t){
   }
   for(i=0;i<G.obs.length;i++){
     var o=G.obs[i];if(o.hit)continue;
-    var sx=o.x-G.dx;if(sx<-60||sx>W+10)continue;
-    block(sx,o);
+    var sx=obX(o,G.elapsed/1000)-G.dx;if(sx<-60||sx>W+10)continue;
+    block(sx,o,obLift(o,G.elapsed/1000));
   }
-  if(!(G.inv>0&&Math.floor(t/80)%2))dino(80,GROUND-G.y,G.y>0,t);
+  if(!(G.inv>0&&Math.floor(t/80)%2)){
+    cx.save();cx.translate(80,GROUND-G.y);cx.scale(G.size,G.size);dino(0,0,G.y>0,t);cx.restore();
+  }
   cx.fillStyle='#535353';cx.font='bold 18px sans-serif';cx.textAlign='left';
   cx.fillText((total()/1000).toFixed(2)+'초',12,26);
-  cx.textAlign='right';cx.fillText(G.hits?'페널티 ×'+G.hits:'',W-12,26);
+  cx.textAlign='right';cx.fillText(G.hits?'페널티 ×'+G.hits+(DIFFS[G.d].grow?' · 공룡 '+sizeOf(G).toFixed(1)+'배':''):'',W-12,26);
   cx.fillStyle='#ddd';rect(12,36,W-24,6);cx.fillStyle='#e8590c';rect(12,36,(W-24)*Math.min(1,G.dx/GOAL),6);
   cx.fillStyle='#999';cx.font='13px sans-serif';cx.textAlign='center';
   if(G.state==='count'){
@@ -338,7 +359,7 @@ function draw(t){
 
 function finish(){
   var ms=total(),hits=G.hits;G.state='done';cancelAnimationFrame(raf);
-  var d=G.d;
+  var d=G.d,grown=DIFFS[d].grow?' · 공룡 '+sizeOf(G).toFixed(1)+'배':'';
   show('s-result');
   $('res-diff').textContent='['+DIFFS[d].label+'] 완료 시간';
   $('res-time').textContent=fmt(ms);
@@ -346,7 +367,7 @@ function finish(){
   $('res-rank').innerHTML='';
   $('again').disabled=true;
   submit(player,ms,d,function(rank,online){
-    $('res-msg').textContent=(rank?'🎉 '+rank+'위 등록!':'아쉽게 TOP 10 진입 실패')+' · 충돌 '+hits+'회'+(online?'':' (오프라인 저장)');
+    $('res-msg').textContent=(rank?'🎉 '+rank+'위 등록!':'아쉽게 TOP 10 진입 실패')+' · 충돌 '+hits+'회'+grown+(online?'':' (오프라인 저장)');
     fetchRank(d,function(r){renderRank($('res-rank'),r,rank);$('again').disabled=false});
   });
 }

@@ -6,10 +6,10 @@ create table if not exists public.rankings (
   created_at timestamptz not null default now()
 );
 
--- 난이도별 랭킹 (easy / normal / hard)
+-- 난이도별 랭킹 (easy / normal / hard / extreme)
 alter table public.rankings add column if not exists difficulty text not null default 'normal';
 alter table public.rankings drop constraint if exists rankings_difficulty_check;
-alter table public.rankings add constraint rankings_difficulty_check check (difficulty in ('easy','normal','hard'));
+alter table public.rankings add constraint rankings_difficulty_check check (difficulty in ('easy','normal','hard','extreme'));
 
 drop index if exists public.rankings_rank_idx;
 create index if not exists rankings_rank_idx2 on public.rankings (difficulty, time_ms asc, created_at asc);
@@ -23,7 +23,7 @@ create policy "rankings readable by all" on public.rankings
 -- 직접 쓰기 정책은 만들지 않음 (RPC로만 기록)
 revoke insert, update, delete on public.rankings from anon, authenticated;
 
--- 난이도별 최단 가능 시간(ms) 미만은 거절: 쉬움 36s / 보통 30s / 어려움 23.7s 가 이론상 최소
+-- 난이도별 최단 가능 시간(ms) 미만은 거절: 쉬움 36s / 보통 30s / 어려움 23.7s / 완죤어려움 22.5s 가 이론상 최소
 create or replace function public.submit_score(p_name text, p_time_ms integer, p_difficulty text)
 returns integer
 language plpgsql
@@ -40,7 +40,7 @@ begin
   if char_length(v_name) < 1 or char_length(v_name) > 12 then
     raise exception 'invalid name';
   end if;
-  v_min := case v_diff when 'easy' then 33000 when 'normal' then 28000 when 'hard' then 22000 else null end;
+  v_min := case v_diff when 'easy' then 33000 when 'normal' then 28000 when 'hard' then 22000 when 'extreme' then 21000 else null end;
   if v_min is null then
     raise exception 'invalid difficulty';
   end if;
